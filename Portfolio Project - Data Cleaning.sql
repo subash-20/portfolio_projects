@@ -1,358 +1,269 @@
--- SQL Project - Data Cleaning
+-- =============================================================================================================
+-- SQL Project: Data Cleaning for Netflix Shows Dataset
+-- Source: https://www.kaggle.com/datasets/shivamb/netflix-shows
+-- =============================================================================================================
 
--- https://www.kaggle.com/datasets/swaptr/layoffs-2022
+SELECT * FROM netflix.netflix_titles;
 
+-- ==============================================================================================================
+-- Step 1: Create Staging Tables
+-- Create a staging table that mimics the structure of the original table for safe data transformations
 
+CREATE TABLE netflix.netflix_staging 
+LIKE netflix.netflix_titles;
 
+-- Insert data into the staging table to avoid any accidental data loss in the original table
 
+INSERT netflix_staging
+SELECT * FROM netflix.netflix_titles;
 
+-- ===============================================================================================================
+-- Step 2: Data Cleaning Steps
+-- Step 2.1: Remove Duplicate Records
+-- Identify duplicates by grouping on show_id and checking counts greater than 1
 
-SELECT * 
-FROM world_layoffs.layoffs;
+SELECT show_id, COUNT(*)
+FROM netflix_staging
+GROUP BY show_id
+HAVING COUNT(*) > 1;
 
+-- If duplicates are found, consider deleting them or keeping one entry per show_id
+-- -----------------------------------------------------------------------------------------------------------------
+-- Step 2.2: Identify and Handle Null Values
+-- Count null values across all key columns to ensure no missing data in critical fields
 
+SELECT
+    SUM(CASE WHEN show_id IS NULL OR show_id = '' THEN 1 ELSE 0 END) AS showid_nulls,
+    SUM(CASE WHEN type IS NULL OR type = '' THEN 1 ELSE 0 END) AS type_nulls,
+    SUM(CASE WHEN title IS NULL OR title = '' THEN 1 ELSE 0 END) AS title_nulls,
+    SUM(CASE WHEN director IS NULL OR director = '' THEN 1 ELSE 0 END) AS director_nulls,
+    SUM(CASE WHEN cast IS NULL OR cast = '' THEN 1 ELSE 0 END) AS movie_cast_nulls,
+    SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) AS country_nulls,
+    SUM(CASE WHEN date_added IS NULL OR date_added = '' THEN 1 ELSE 0 END) AS date_added_nulls,
+    SUM(CASE WHEN release_year IS NULL OR release_year = '' THEN 1 ELSE 0 END) AS release_year_nulls,
+    SUM(CASE WHEN rating IS NULL OR rating = '' THEN 1 ELSE 0 END) AS rating_nulls,
+    SUM(CASE WHEN duration IS NULL OR duration = '' THEN 1 ELSE 0 END) AS duration_nulls,
+    SUM(CASE WHEN listed_in IS NULL OR listed_in = '' THEN 1 ELSE 0 END) AS listed_in_nulls,
+    SUM(CASE WHEN description IS NULL OR description = '' THEN 1 ELSE 0 END) AS description_nulls
+FROM 
+    netflix_staging;
+-- -----------------------------------------------------------------------------------------------------------------
+-- Step 2.3: Handle Null Values in Key Columns
+-- For director nulls, populate the column by associating specific directors with recurring actors in movie_cast.
+-- For unmatched director nulls, set as 'Not Given'.
 
--- first thing we want to do is create a staging table. This is the one we will work in and clean the data. We want a table with the raw data in case something happens
-CREATE TABLE world_layoffs.layoffs_staging 
-LIKE world_layoffs.layoffs;
-
-INSERT layoffs_staging 
-SELECT * FROM world_layoffs.layoffs;
-
-
--- now when we are data cleaning we usually follow a few steps
--- 1. check for duplicates and remove any
--- 2. standardize data and fix errors
--- 3. Look at null values and see what 
--- 4. remove any columns and rows that are not necessary - few ways
-
-
-
--- 1. Remove Duplicates
-
-# First let's check for duplicates
-
-
-
-SELECT *
-FROM world_layoffs.layoffs_staging
-;
-
-SELECT company, industry, total_laid_off,`date`,
-		ROW_NUMBER() OVER (
-			PARTITION BY company, industry, total_laid_off,`date`) AS row_num
-	FROM 
-		world_layoffs.layoffs_staging;
-
-
-
-SELECT *
-FROM (
-	SELECT company, industry, total_laid_off,`date`,
-		ROW_NUMBER() OVER (
-			PARTITION BY company, industry, total_laid_off,`date`
-			) AS row_num
-	FROM 
-		world_layoffs.layoffs_staging
-) duplicates
-WHERE 
-	row_num > 1;
-    
--- let's just look at oda to confirm
-SELECT *
-FROM world_layoffs.layoffs_staging
-WHERE company = 'Oda'
-;
--- it looks like these are all legitimate entries and shouldn't be deleted. We need to really look at every single row to be accurate
-
--- these are our real duplicates 
-SELECT *
-FROM (
-	SELECT company, location, industry, total_laid_off,percentage_laid_off,`date`, stage, country, funds_raised_millions,
-		ROW_NUMBER() OVER (
-			PARTITION BY company, location, industry, total_laid_off,percentage_laid_off,`date`, stage, country, funds_raised_millions
-			) AS row_num
-	FROM 
-		world_layoffs.layoffs_staging
-) duplicates
-WHERE 
-	row_num > 1;
-
--- these are the ones we want to delete where the row number is > 1 or 2or greater essentially
-
--- now you may want to write it like this:
-WITH DELETE_CTE AS 
+WITH cte AS
 (
-SELECT *
-FROM (
-	SELECT company, location, industry, total_laid_off,percentage_laid_off,`date`, stage, country, funds_raised_millions,
-		ROW_NUMBER() OVER (
-			PARTITION BY company, location, industry, total_laid_off,percentage_laid_off,`date`, stage, country, funds_raised_millions
-			) AS row_num
-	FROM 
-		world_layoffs.layoffs_staging
-) duplicates
-WHERE 
-	row_num > 1
+SELECT title, CONCAT(director, '---', cast) AS director_cast 
+FROM netflix_staging
 )
-DELETE
-FROM DELETE_CTE
-;
-
-
-WITH DELETE_CTE AS (
-	SELECT company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, country, funds_raised_millions, 
-    ROW_NUMBER() OVER (PARTITION BY company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, country, funds_raised_millions) AS row_num
-	FROM world_layoffs.layoffs_staging
-)
-DELETE FROM world_layoffs.layoffs_staging
-WHERE (company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, country, funds_raised_millions, row_num) IN (
-	SELECT company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, country, funds_raised_millions, row_num
-	FROM DELETE_CTE
-) AND row_num > 1;
-
--- one solution, which I think is a good one. Is to create a new column and add those row numbers in. Then delete where row numbers are over 2, then delete that column
--- so let's do it!!
-
-ALTER TABLE world_layoffs.layoffs_staging ADD row_num INT;
-
-
-SELECT *
-FROM world_layoffs.layoffs_staging
-;
-
-CREATE TABLE `world_layoffs`.`layoffs_staging2` (
-`company` text,
-`location`text,
-`industry`text,
-`total_laid_off` INT,
-`percentage_laid_off` text,
-`date` text,
-`stage`text,
-`country` text,
-`funds_raised_millions` int,
-row_num INT
-);
-
-INSERT INTO `world_layoffs`.`layoffs_staging2`
-(`company`,
-`location`,
-`industry`,
-`total_laid_off`,
-`percentage_laid_off`,
-`date`,
-`stage`,
-`country`,
-`funds_raised_millions`,
-`row_num`)
-SELECT `company`,
-`location`,
-`industry`,
-`total_laid_off`,
-`percentage_laid_off`,
-`date`,
-`stage`,
-`country`,
-`funds_raised_millions`,
-		ROW_NUMBER() OVER (
-			PARTITION BY company, location, industry, total_laid_off,percentage_laid_off,`date`, stage, country, funds_raised_millions
-			) AS row_num
-	FROM 
-		world_layoffs.layoffs_staging;
-
--- now that we have this we can delete rows were row_num is greater than 2
-
-DELETE FROM world_layoffs.layoffs_staging2
-WHERE row_num >= 2;
-
-
-
-
-
-
-
--- 2. Standardize Data
-
-SELECT * 
-FROM world_layoffs.layoffs_staging2;
-
--- if we look at industry it looks like we have some null and empty rows, let's take a look at these
-SELECT DISTINCT industry
-FROM world_layoffs.layoffs_staging2
-ORDER BY industry;
-
-SELECT *
-FROM world_layoffs.layoffs_staging2
-WHERE industry IS NULL 
-OR industry = ''
-ORDER BY industry;
 
--- let's take a look at these
-SELECT *
-FROM world_layoffs.layoffs_staging2
-WHERE company LIKE 'Bally%';
--- nothing wrong here
-SELECT *
-FROM world_layoffs.layoffs_staging2
-WHERE company LIKE 'airbnb%';
-
--- it looks like airbnb is a travel, but this one just isn't populated.
--- I'm sure it's the same for the others. What we can do is
--- write a query that if there is another row with the same company name, it will update it to the non-null industry values
--- makes it easy so if there were thousands we wouldn't have to manually check them all
-
--- we should set the blanks to nulls since those are typically easier to work with
-UPDATE world_layoffs.layoffs_staging2
-SET industry = NULL
-WHERE industry = '';
-
--- now if we check those are all null
-
-SELECT *
-FROM world_layoffs.layoffs_staging2
-WHERE industry IS NULL 
-OR industry = ''
-ORDER BY industry;
-
--- now we need to populate those nulls if possible
-
-UPDATE layoffs_staging2 t1
-JOIN layoffs_staging2 t2
-ON t1.company = t2.company
-SET t1.industry = t2.industry
-WHERE t1.industry IS NULL
-AND t2.industry IS NOT NULL;
-
--- and if we check it looks like Bally's was the only one without a populated row to populate this null values
-SELECT *
-FROM world_layoffs.layoffs_staging2
-WHERE industry IS NULL 
-OR industry = ''
-ORDER BY industry;
-
--- ---------------------------------------------------
-
--- I also noticed the Crypto has multiple different variations. We need to standardize that - let's say all to Crypto
-SELECT DISTINCT industry
-FROM world_layoffs.layoffs_staging2
-ORDER BY industry;
-
-UPDATE layoffs_staging2
-SET industry = 'Crypto'
-WHERE industry IN ('Crypto Currency', 'CryptoCurrency');
-
--- now that's taken care of:
-SELECT DISTINCT industry
-FROM world_layoffs.layoffs_staging2
-ORDER BY industry;
-
--- --------------------------------------------------
--- we also need to look at 
-
-SELECT *
-FROM world_layoffs.layoffs_staging2;
-
--- everything looks good except apparently we have some "United States" and some "United States." with a period at the end. Let's standardize this.
-SELECT DISTINCT country
-FROM world_layoffs.layoffs_staging2
-ORDER BY country;
-
-UPDATE layoffs_staging2
-SET country = TRIM(TRAILING '.' FROM country);
-
--- now if we run this again it is fixed
-SELECT DISTINCT country
-FROM world_layoffs.layoffs_staging2
-ORDER BY country;
-
-
--- Let's also fix the date columns:
-SELECT *
-FROM world_layoffs.layoffs_staging2;
-
--- we can use str to date to update this field
-UPDATE layoffs_staging2
-SET `date` = STR_TO_DATE(`date`, '%m/%d/%Y');
-
--- now we can convert the data type properly
-ALTER TABLE layoffs_staging2
-MODIFY COLUMN `date` DATE;
-
-
-SELECT *
-FROM world_layoffs.layoffs_staging2;
-
-
-
-
-
--- 3. Look at Null Values
-
--- the null values in total_laid_off, percentage_laid_off, and funds_raised_millions all look normal. I don't think I want to change that
--- I like having them null because it makes it easier for calculations during the EDA phase
-
--- so there isn't anything I want to change with the null values
-
-
-
-
--- 4. remove any columns and rows we need to
-
-SELECT *
-FROM world_layoffs.layoffs_staging2
-WHERE total_laid_off IS NULL;
-
-
-SELECT *
-FROM world_layoffs.layoffs_staging2
-WHERE total_laid_off IS NULL
-AND percentage_laid_off IS NULL;
-
--- Delete Useless data we can't really use
-DELETE FROM world_layoffs.layoffs_staging2
-WHERE total_laid_off IS NULL
-AND percentage_laid_off IS NULL;
-
-SELECT * 
-FROM world_layoffs.layoffs_staging2;
-
-ALTER TABLE layoffs_staging2
-DROP COLUMN row_num;
-
-
-SELECT * 
-FROM world_layoffs.layoffs_staging2;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+SELECT director_cast, COUNT(*) AS count
+FROM cte
+GROUP BY director_cast
+HAVING COUNT(*) > 1
+ORDER BY COUNT(*) DESC;
+
+-- Check for specific actor/director associations to populate director field
+-- Populate director for rows with nulls
+-- Additional updates for specific directors/casts...
+
+UPDATE netflix_staging 
+SET director = 'Alastair Fothergill'
+WHERE cast = 'David Attenborough'
+AND (director IS NULL or director = '') ;
+
+UPDATE netflix_staging 
+SET director = 'Jon Mackey, Joe Guidry'
+WHERE cast like '%David Spade%'
+AND (director IS NULL or director = '') ;
+
+UPDATE netflix_staging 
+SET director = 'Todd Kauffman, Mark Thornton'
+WHERE cast like '%Michela Luci%'
+AND (director IS NULL or director = '')
+AND title like 'True%' ;
+
+UPDATE netflix_staging 
+SET director = 'Simon Pike'
+where title like 'Oddbods%';
+
+-- Populate any remaining director nulls with 'Not Given'
+
+UPDATE netflix_staging 
+SET director = 'Not Given'
+WHERE director IS NULL or director = '';
+
+-- -------------------------------------------------------------------------------------------------------------------
+-- Step 2.4: Attempt to Populate Country Values Using Associated Directors
+-- Using a join on director, update the country column for rows with null values.
+
+SELECT director, MAX(country) AS known_country
+    FROM netflix_staging
+    WHERE country IS NOT NULL
+    GROUP BY director;
+
+-- Update country values for rows with missing or empty country field
+
+UPDATE netflix_staging ns
+JOIN (
+    SELECT director, MAX(country) AS known_country
+    FROM netflix_staging
+    WHERE country IS NOT NULL
+    GROUP BY director
+) director_country
+ON ns.director = director_country.director
+SET ns.country = director_country.known_country
+WHERE ns.country IS NULL or ns.country = '';
+
+-- ---------------------------------------------------------------------------------------------------------------------------
+-- Step 2.5: Finding Directors with Multiple Titles but No Country
+-- Identify directors with multiple titles but still missing country information
+
+SELECT COUNT(*) AS count, ns.director, director_country.known_country AS new_country
+FROM netflix_staging ns
+JOIN (
+    SELECT director, MAX(country) AS known_country
+    FROM netflix_staging
+    WHERE country IS NOT NULL
+    GROUP BY director
+) director_country
+ON ns.director = director_country.director
+WHERE ns.country IS NULL OR ns.country = ''
+GROUP BY ns.director, director_country.known_country
+ORDER BY count DESC;
+
+-- --------------------------------------------------------------------------------------------------------------------------
+-- Step 2.6: Update Country for Specific Directors with Multiple Films
+
+UPDATE netflix_staging
+SET country = 'India'
+WHERE director = 'Prakash Satam'
+AND (country IS NULL OR country = '');
+
+UPDATE netflix_staging
+SET country = 'Canada'
+WHERE director = 'Joey So'
+AND (country IS NULL OR country = '');
+
+UPDATE netflix_staging
+SET country = 'India'
+WHERE director = 'Rathindran R Prasad'
+AND (country IS NULL OR country = '');
+
+-- Populate 'Not Given' for any remaining missing country values
+
+UPDATE netflix_staging
+SET country = 'Not Given'
+WHERE country IS NULL or country = '';
+
+-- -----------------------------------------------------------------------------------------------------------------------------------
+-- Step 2.7: Handle Other Nulls
+-- For columns like date_added, rating, and duration, where the number of nulls is minimal, consider deleting these rows.
+-- Delete rows with null or empty values in specific columns
+
+DELETE FROM netflix_staging
+WHERE date_added IS NULL OR date_added = ''
+   OR rating IS NULL OR rating = ''
+   OR duration IS NULL OR duration = '';
+
+-- ======================================================================================================================================
+-- Step 3: Drop Unnecessary Columns
+-- Remove columns that are not needed for analysis, such as 'movie_cast' and 'description'.
+
+ALTER TABLE netflix_staging
+DROP COLUMN cast,
+DROP COLUMN description;
+
+-- =======================================================================================================================================
+-- Step 4: Final Data Quality Checks
+-- Recheck for any remaining null values in critical columns
+
+SELECT
+    SUM(CASE WHEN show_id IS NULL OR show_id = '' THEN 1 ELSE 0 END) AS showid_nulls,
+    SUM(CASE WHEN type IS NULL OR type = '' THEN 1 ELSE 0 END) AS type_nulls,
+    SUM(CASE WHEN title IS NULL OR title = '' THEN 1 ELSE 0 END) AS title_nulls,
+    SUM(CASE WHEN director IS NULL OR director = '' THEN 1 ELSE 0 END) AS director_nulls,
+    SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) AS country_nulls,
+    SUM(CASE WHEN date_added IS NULL OR date_added = '' THEN 1 ELSE 0 END) AS date_added_nulls,
+    SUM(CASE WHEN release_year IS NULL OR release_year = '' THEN 1 ELSE 0 END) AS release_year_nulls,
+    SUM(CASE WHEN rating IS NULL OR rating = '' THEN 1 ELSE 0 END) AS rating_nulls,
+    SUM(CASE WHEN duration IS NULL OR duration = '' THEN 1 ELSE 0 END) AS duration_nulls,
+    SUM(CASE WHEN listed_in IS NULL OR listed_in = '' THEN 1 ELSE 0 END) AS listed_in_nulls
+FROM 
+    netflix_staging;
+
+-- Verify country data and counts
+select country, count(*) from netflix_staging group by country order by country;
+
+-- ===============================================================================================================================
+-- Step 5: Final Clean-Up and Validation
+-- Simplify the country field and populate missing or ambiguous entries
+-- Split country values and keep only the primary country (first part before the comma).
+-- Create a new column 'country1' to store the first country listed.
+
+ALTER TABLE netflix_staging
+ADD country1 VARCHAR(500);
+
+-- Populate country1 with the first country listed from 'country'
+
+UPDATE netflix_staging
+SET country1 = SUBSTRING_INDEX(country, ',', 1);
+
+-- Verify the updates to the country1 column
+
+select country1, country from netflix_staging order by country1;
+
+-- -------------------------------------------------------------------------------------------------------------------------------
+-- Step 5.1: Drop Original Country Column and Rename 'country1'
+-- Drop the original 'country' column and rename 'country1' to 'country'
+
+ALTER TABLE netflix_staging
+DROP COLUMN country;
+
+ALTER TABLE netflix_staging
+RENAME COLUMN country1 TO country;
+
+-- Remove rows where 'country' is NULL or blank
+
+DELETE FROM netflix_staging
+WHERE country IS NULL OR country = '';
+
+-- Step 5.2: Convert the string format of 'date_added' column to MySQL DATE format
+-- The STR_TO_DATE function is used to convert the 'date_added' string values from format '%M %d, %Y' (e.g., 'September 25, 2021')
+-- into a proper MySQL DATE type (YYYY-MM-DD). This helps in standardizing the date format for further operations.
+
+UPDATE netflix_staging
+SET date_added = STR_TO_DATE(date_added, '%M %d, %Y');
+
+-- Step 5.3: Alter the 'date_added' column data type to DATE
+-- After converting the 'date_added' column values to a valid DATE format, the column's data type is changed 
+-- from its original type (likely VARCHAR or TEXT) to the DATE type for better storage and query performance.
+
+ALTER TABLE netflix_staging
+MODIFY COLUMN date_added DATE;
+
+-- ========================================================================================================================================
+-- Step 6: Verify Cleaned Data
+-- Confirm there are no remaining nulls in critical columns
+-- Verify Row Count Consistency: Ensure that all columns have the same number of rows after cleaning, with no unintended nulls remaining.
+
+SELECT
+    SUM(CASE WHEN show_id IS NULL OR show_id = '' THEN 1 ELSE 0 END) AS showid_nulls,
+    SUM(CASE WHEN type IS NULL OR type = '' THEN 1 ELSE 0 END) AS type_nulls,
+    SUM(CASE WHEN title IS NULL OR title = '' THEN 1 ELSE 0 END) AS title_nulls,
+    SUM(CASE WHEN director IS NULL OR director = '' THEN 1 ELSE 0 END) AS director_nulls,
+    SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) AS country_nulls,
+    SUM(CASE WHEN date_added IS NULL OR date_added = '' THEN 1 ELSE 0 END) AS date_added_nulls,
+    SUM(CASE WHEN release_year IS NULL OR release_year = '' THEN 1 ELSE 0 END) AS release_year_nulls,
+    SUM(CASE WHEN rating IS NULL OR rating = '' THEN 1 ELSE 0 END) AS rating_nulls,
+    SUM(CASE WHEN duration IS NULL OR duration = '' THEN 1 ELSE 0 END) AS duration_nulls,
+    SUM(CASE WHEN listed_in IS NULL OR listed_in = '' THEN 1 ELSE 0 END) AS listed_in_nulls
+FROM 
+    netflix_staging;
+    
+-- Final table review to ensure data consistency and correctness
+
+SELECT * FROM netflix.netflix_staging;
+
+-- =================================================================================================================================================
