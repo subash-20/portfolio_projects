@@ -1,5 +1,5 @@
 -- -------------------------------------------------------------
--- ** Netflix Data Analysis Queries for Portfolio**
+-- ** Exploratory Data Analysis On Netflix Data **
 -- These queries are designed to analyze the content dataset
 -- from the `netflix_staging` table. The goal is to explore 
 -- various aspects of the dataset such as the distribution of
